@@ -37,7 +37,7 @@ This project was developed by:
 - 📘 **Facebook**: [facebook.com/architbishnoi29](https://www.facebook.com/architbishnoi29)
 - 🛠️ **Other Live Projects**:
   - [Smart-Compiler Cloud IDE](https://smartcompiler-swart.vercel.app/)
-  - [Price Predictions of Used Mobiles](https://github.com/Archit0029/Price_Predictions_of_used_mobiles)
+  - [Price Predictions of Used Mobiles](https://pricepredictions.vercel.app/)
   - [File Converter Web Application](https://github.com/Archit0029/File-Converter-Website)
 
 ---
