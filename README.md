@@ -30,13 +30,13 @@ This project was developed by:
 | **Navneet Singh Saini** | Dataset Curation & Empirical Validation | [![GitHub](https://img.shields.io/badge/navneetsingh90-181717?style=flat&logo=github)](https://github.com/navneetsingh90) |
 
 ### 🔗 Connect with Archit Bishnoi:
-- 🌐 **Portfolio Website**: [architbishnoi.me](https://architbishnoi.me) / [archit0029.vercel.app](https://archit0029.vercel.app)
+- 🌐 **Portfolio Website**: [archit-portfolio-one.vercel.app](https://archit-portfolio-one.vercel.app/)
 - 💼 **LinkedIn**: [linkedin.com/in/archit-29bishnoi](https://www.linkedin.com/in/archit-29bishnoi)
 - 🐙 **GitHub**: [github.com/Archit0029](https://github.com/Archit0029)
 - 📸 **Instagram**: [@archit_bishnoi029](https://www.instagram.com/archit_bishnoi029/)
 - 📘 **Facebook**: [facebook.com/architbishnoi29](https://www.facebook.com/architbishnoi29)
 - 🛠️ **Other Live Projects**:
-  - [Smart-Compiler Cloud IDE](https://smart-compiler.vercel.app)
+  - [Smart-Compiler Cloud IDE](https://smartcompiler-swart.vercel.app/)
   - [Price Predictions of Used Mobiles](https://github.com/Archit0029/Price_Predictions_of_used_mobiles)
   - [File Converter Web Application](https://github.com/Archit0029/File-Converter-Website)
 
@@ -197,3 +197,4 @@ ewaste_sorter/
 ## 📜 License & Citation
 
 This project is open-source and available under the **MIT License**. If you use this work in your research, university project, or product, please give credit to **Archit Bishnoi, Atul Kumar Singh, and Navneet Singh Saini**.
+
