@@ -394,24 +394,27 @@ async function detectLoop() {
     }
 
     // -------------------------------------------------------------
-    // 3-SECOND STABILITY ANALYSIS & ARDUINO SERVO TRIGGER
+    // SENSOR-TRIGGERED CAMERA SCAN & 3-SECOND ANALYSIS
     // -------------------------------------------------------------
     const currentTime = performance.now();
-    const itemInRange = (distance !== null && distance <= 15.0) || (distance === null && topCat !== null);
+    // Rule: Camera only scans and triggers analysis IF ultrasonic sensor senses an item (<= 15 cm)
+    // (If distance is null, e.g. Arduino not plugged in, allow simulation mode so UI is testable)
+    const sensorDetectsItem = (distance !== null) ? (distance > 0 && distance <= 15.0) : (topCat !== null);
 
     if (state === 'IDLE') {
       $('countdownBox').style.display = 'none';
-      if (itemInRange && topCat !== null) {
+      if (sensorDetectsItem) {
+        // Sensor has sensed an item! Start the 3-second visual analysis countdown
         state = 'ANALYZING';
         analysisStart = currentTime;
-        sampleVotes = [topCat];
-        $('systemState').textContent = 'Analyzing (3s)...';
+        sampleVotes = topCat ? [topCat] : [];
+        $('systemState').textContent = 'Sensor Triggered: Analyzing (3s)...';
         $('decisionCard').className = 'decision-box analyzing';
-        $('decisionCard').textContent = 'ANALYZING ITEM STABILITY...';
+        $('decisionCard').textContent = 'SENSOR TRIGGERED: ANALYZING (3s)...';
       } else {
-        $('systemState').textContent = 'Ready';
+        $('systemState').textContent = 'Ready (Waiting for Sensor <= 15cm)';
         $('decisionCard').className = 'decision-box';
-        $('decisionCard').textContent = 'WAITING FOR ITEM';
+        $('decisionCard').textContent = 'WAITING FOR SENSOR TRIGGER (<= 15cm)';
       }
     } else if (state === 'ANALYZING') {
       $('countdownBox').style.display = 'block';
@@ -420,13 +423,20 @@ async function detectLoop() {
       $('countdownNum').textContent = `${remaining.toFixed(1)}s`;
       $('countdownBar').style.width = `${((ANALYSIS_DURATION - elapsed) / ANALYSIS_DURATION) * 100}%`;
 
+      // Collect camera vision classifications over the 3 seconds
       if (topCat) sampleVotes.push(topCat);
 
+      // Once 3 SECONDS ARE COMPLETE -> AUTOMATIC MOTOR ROTATION WITHOUT ASKING SENSOR
       if (elapsed >= ANALYSIS_DURATION) {
-        // Vote majority
         const countE = sampleVotes.filter(v => v === 'E').length;
         const countN = sampleVotes.filter(v => v === 'N').length;
-        fixedDecision = countE >= countN ? 'E' : 'N';
+        
+        // Final fixed decision from 3-second camera analysis
+        if (countE > 0 || countN > 0) {
+          fixedDecision = (countE >= countN) ? 'E' : 'N';
+        } else {
+          fixedDecision = (topCat === 'E') ? 'E' : 'N';
+        }
 
         state = 'DECIDED';
         $('countdownBox').style.display = 'none';
@@ -434,26 +444,29 @@ async function detectLoop() {
 
         if (fixedDecision === 'E') {
           $('decisionCard').className = 'decision-box ewaste';
-          $('decisionCard').textContent = 'DECISION: E-WASTE (MOTOR LEFT 0°)';
-          $('systemState').textContent = 'E-Waste Sorted';
+          $('decisionCard').textContent = '3s COMPLETE: E-WASTE (MOTOR TURNING LEFT 0°)';
+          $('systemState').textContent = 'Motor Rotating Left (0°)';
           sendSerial('E\n');
         } else {
           $('decisionCard').className = 'decision-box normal';
-          $('decisionCard').textContent = 'DECISION: NORMAL WASTE (MOTOR RIGHT 180°)';
-          $('systemState').textContent = 'Normal Waste Sorted';
+          $('decisionCard').textContent = '3s COMPLETE: NORMAL WASTE (MOTOR TURNING RIGHT 180°)';
+          $('systemState').textContent = 'Motor Rotating Right (180°)';
           sendSerial('N\n');
         }
       }
     } else if (state === 'DECIDED') {
-      if (currentTime - cooldownTimer > 2000) {
+      // Allow 2.5 seconds for servo to complete rotation and drop the item
+      if (currentTime - cooldownTimer > 2500) {
         state = 'COOLDOWN';
-        $('systemState').textContent = 'Sort Complete. Remove item.';
+        $('systemState').textContent = 'Motor reset. Remove item to clear.';
       }
     } else if (state === 'COOLDOWN') {
-      const itemCleared = (distance !== null && distance > 20.0) || (distance === null && topCat === null);
+      // Reset ready state once item is cleared (> 20 cm)
+      const itemCleared = (distance !== null) ? (distance > 20.0 || distance < 0) : (topCat === null);
       if (itemCleared) {
         state = 'IDLE';
         fixedDecision = null;
+        sampleVotes = [];
         $('decisionCard').className = 'decision-box';
         $('decisionCard').textContent = 'READY FOR NEXT ITEM';
       }

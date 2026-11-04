@@ -298,36 +298,38 @@ def run_sorter(model_path="yolov8n.pt", camera_index=0, com_port=None, conf_thre
                     cv2.putText(frame, caption, (x1 + 4, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
             # ------------------------------------------------------------------
-            # State Machine: 3-Second Analysis & Servo Trigger
+            # Sensor-Triggered Camera Scan + Automatic 3-Second Motor Rotation
             # ------------------------------------------------------------------
-            # Trigger item presence either via ultrasonic sensor (<=15cm) OR clear detection in camera
-            item_present = (dist is not None and dist <= 15.0) or (dist is None and current_frame_category is not None)
+            # Rule: Camera analysis ONLY initiates when the ultrasonic sensor detects an item (<= 15 cm)
+            # If Arduino is not plugged in, allow simulation mode if an object appears
+            sensor_detects_item = (dist is not None and dist > 0 and dist <= 15.0) or (dist is None and current_frame_category is not None)
 
             if state == "IDLE":
-                if item_present and current_frame_category is not None:
-                    # Item detected -> Start 3-second analysis!
+                if sensor_detects_item:
+                    # Sensor sensed an item! Start the 3-second camera analysis
                     state = "ANALYZING"
                     analysis_start_time = current_time
-                    analysis_samples = [current_frame_category]
-                    last_action = "Item detected! Analyzing stability for 3 seconds..."
-                    print(f"\n[AI] Item detected. Starting 3-second analysis...")
+                    analysis_samples = [current_frame_category] if current_frame_category else []
+                    last_action = "Sensor detected item! Camera analyzing for 3 seconds..."
+                    print(f"\n[AI] Sensor triggered (<= 15cm). Starting 3-second camera analysis...")
 
             elif state == "ANALYZING":
                 time_elapsed = current_time - analysis_start_time
                 time_left = max(0.0, analysis_duration - time_elapsed)
 
+                # Camera scans and collects votes continuously during the 3 seconds
                 if current_frame_category is not None:
                     analysis_samples.append(current_frame_category)
 
-                # Show prominent countdown timer in center of frame
+                # Prominent countdown HUD
                 center_text = f"ANALYZING: {time_left:.1f}s"
                 (tw, th), _ = cv2.getTextSize(center_text, cv2.FONT_HERSHEY_DUPLEX, 1.2, 3)
                 cx, cy = (frame.shape[1] - tw) // 2, (frame.shape[0] + th) // 2
                 cv2.rectangle(frame, (cx - 15, cy - th - 15), (cx + tw + 15, cy + 15), (0, 0, 0), -1)
                 cv2.putText(frame, center_text, (cx, cy), cv2.FONT_HERSHEY_DUPLEX, 1.2, (0, 200, 255), 3)
 
+                # Once 3 SECONDS ARE COMPLETE -> MOTOR ROTATES AUTOMATICALLY (WITHOUT SENSOR PERMISSION)
                 if time_elapsed >= analysis_duration:
-                    # 3 seconds complete: compute authoritative majority vote
                     if analysis_samples:
                         counts = Counter(analysis_samples)
                         winner = counts.most_common(1)[0][0]  # 'E' or 'N'
@@ -339,30 +341,31 @@ def run_sorter(model_path="yolov8n.pt", camera_index=0, com_port=None, conf_thre
                     decision_time = current_time
 
                     if fixed_decision == 'E':
-                        last_action = "FIXED DECISION: E-WASTE! Motor commanded LEFT (0 deg)"
-                        print("[AI] 3s Analysis Finished -> FIXED DECISION: E-WASTE! Turning motor LEFT.")
+                        last_action = "3s COMPLETE -> AUTOMATIC ROTATION: LEFT (0 deg E-Waste)"
+                        print("[AI] 3s Analysis Finished! AUTOMATIC MOTOR ROTATION -> LEFT (0° E-Waste).")
                     else:
-                        last_action = "FIXED DECISION: NORMAL WASTE! Motor commanded RIGHT (180 deg)"
-                        print("[AI] 3s Analysis Finished -> FIXED DECISION: NORMAL WASTE! Turning motor RIGHT.")
+                        last_action = "3s COMPLETE -> AUTOMATIC ROTATION: RIGHT (180 deg Normal Waste)"
+                        print("[AI] 3s Analysis Finished! AUTOMATIC MOTOR ROTATION -> RIGHT (180° Normal Waste).")
 
-                    # Transmit motor command to Arduino
+                    # Transmit motor command directly to Arduino
                     arduino.trigger_sort(fixed_decision)
 
             elif state == "DECIDED":
-                # Give Arduino 1.8 seconds to complete servo movement
-                if current_time - decision_time > 1.8:
+                # Give servo 2.5 seconds to complete turn and drop item
+                if current_time - decision_time > 2.5:
                     state = "COOLDOWN"
-                    last_action = "Sort complete! Waiting for item removal (> 20 cm) to reset..."
-                    print("[AI] Motor completed move. Waiting for item removal...")
+                    last_action = "Motor reset. Waiting for item removal (> 20 cm) to clear..."
+                    print("[AI] Motor completed move. Waiting for chute clearance...")
 
             elif state == "COOLDOWN":
-                # Reset only after item has been cleared
-                item_cleared = (dist is not None and dist > 20.0) or (dist is None and current_frame_category is None)
+                # Clear ready state once item drops/clears
+                item_cleared = (dist is not None and (dist > 20.0 or dist < 0)) or (dist is None and current_frame_category is None)
                 if item_cleared:
                     state = "IDLE"
                     fixed_decision = None
+                    analysis_samples = []
                     last_action = "Ready for next item."
-                    print("[AI] Sensor reset. Ready for next item.")
+                    print("[AI] Chute reset. Ready for next item.")
 
             # Calculate remaining time for HUD
             t_rem = 0.0
