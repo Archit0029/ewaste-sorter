@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI E-Waste Sorter Dashboard (YOLO Object Detection + 3s Analysis)</title>
+<style>
+:root{
+  --bg:#0f172a;--panel:#1e293b;--panel-border:#334155;--text:#f8fafc;--text-muted:#94a3b8;
+  --accent:#38bdf8;--ewaste:#ef4444;--normal:#22c55e;--warn:#f59e0b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);padding:20px;max-width:1200px;margin:auto}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:15px;border-bottom:1px solid var(--panel-border)}
+h1{font-size:1.6rem;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}
+.badge{font-size:0.75rem;padding:3px 8px;border-radius:6px;background:#0284c7;color:#fff;font-weight:600;letter-spacing:0.5px}
+.controls-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:20px}
+.panel{background:var(--panel);border:1px solid var(--panel-border);border-radius:12px;padding:16px}
+button,select{width:100%;padding:10px 14px;border-radius:8px;border:1px solid var(--panel-border);background:#0f172a;color:#fff;font-size:0.9rem;cursor:pointer;font-weight:500;transition:all 0.2s}
+button:hover:not(:disabled){background:#1e293b;border-color:var(--accent)}
+button:disabled,select:disabled{opacity:0.4;cursor:not-allowed}
+button.primary{background:#0284c7;border-color:#38bdf8}
+button.primary:hover:not(:disabled){background:#0369a1}
+button.danger{background:#dc2626;border-color:#ef4444}
+button.danger:hover:not(:disabled){background:#b91c1c}
+
+.main-grid{display:grid;grid-template-columns:1.6fr 1fr;gap:20px}
+@media(max-width:900px){.main-grid{grid-template-columns:1fr}}
+
+.video-container{position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center}
+video{width:100%;height:100%;object-fit:cover}
+canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+
+.countdown-overlay{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  background:rgba(15,23,42,0.9);border:2px solid var(--warn);border-radius:12px;
+  padding:16px 24px;text-align:center;display:none;backdrop-filter:blur(6px);box-shadow:0 10px 25px rgba(0,0,0,0.5);
+}
+.countdown-val{font-size:2.8rem;font-weight:800;color:var(--warn);line-height:1}
+.countdown-bar{width:160px;height:6px;background:#334155;border-radius:3px;margin:10px auto 0;overflow:hidden}
+.countdown-fill{height:100%;width:0;background:var(--warn);transition:width 0.1s linear}
+
+.stat-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06)}
+.stat-row:last-child{border-bottom:none}
+.stat-label{color:var(--text-muted);font-size:0.9rem}
+.stat-val{font-weight:700;font-size:1rem}
+
+.decision-box{margin-top:16px;padding:16px;border-radius:8px;text-align:center;font-weight:700;font-size:1.1rem;background:#0f172a;border:2px dashed #334155;transition:all 0.3s}
+.decision-box.ewaste{background:rgba(239,68,68,0.15);border:2px solid var(--ewaste);color:var(--ewaste)}
+.decision-box.normal{background:rgba(34,197,94,0.15);border:2px solid var(--normal);color:var(--normal)}
+.decision-box.analyzing{background:rgba(245,158,11,0.15);border:2px solid var(--warn);color:var(--warn)}
+
+.status-badge{display:inline-block;padding:4px 10px;border-radius:999px;font-size:0.8rem;font-weight:600}
+.status-good{background:rgba(34,197,94,0.2);color:#4ade80}
+.status-warn{background:rgba(245,158,11,0.2);color:#fbbf24}
+.status-bad{background:rgba(239,68,68,0.2);color:#f87171}
+ul.rules-list{list-style:none;font-size:0.85rem;color:var(--text-muted)}
+ul.rules-list li{margin-bottom:8px;padding-left:14px;position:relative}
+ul.rules-list li::before{content:"•";color:var(--accent);position:absolute;left:0}
+</style>
+<!-- TensorFlow.js + COCO-SSD (Browser-based YOLO-equivalent Object Detector) -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>AI E-Waste Sorter <span class="badge">YOLO Vision Engine</span></h1>
+    <p style="color:var(--text-muted);font-size:0.85rem;margin-top:4px">Real-time object bounding boxes + 3-second stability analysis + Arduino sorting</p>
+  </div>
+  <div id="engineStatus" class="status-badge status-warn">Model loading…</div>
+</header>
+
+<div class="controls-grid">
+  <div class="panel">
+    <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:6px">Select Webcam</label>
+    <select id="cams"><option value="">Detecting cameras…</option></select>
+  </div>
+  <div class="panel">
+    <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:6px">Camera Control</label>
+    <button id="cameraBtn" class="primary" disabled>Start Camera Feed</button>
+  </div>
+  <div class="panel">
+    <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:6px">Arduino COM Connection</label>
+    <button id="arduinoBtn">Connect Arduino USB</button>
+  </div>
+  <div class="panel">
+    <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:6px">System Stop</label>
+    <button id="stopBtn" class="danger">Stop All Operations</button>
+  </div>
+</div>
+
+<div class="main-grid">
+  <!-- Video and Detection Viewport -->
+  <section class="panel">
+    <h2 style="font-size:1.1rem;margin-bottom:12px;display:flex;justify-content:space-between">
+      <span>Live Camera View</span>
+      <span id="fpsMeter" style="font-size:0.85rem;color:var(--text-muted)">FPS: --</span>
+    </h2>
+    <div class="video-container">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div id="countdownBox" class="countdown-overlay">
+        <div style="font-size:0.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px">Analyzing Item</div>
+        <div id="countdownNum" class="countdown-val">3.0s</div>
+        <div class="countdown-bar"><div id="countdownBar" class="countdown-fill"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Status & Decision Panel -->
+  <section class="panel">
+    <h2 style="font-size:1.1rem;margin-bottom:12px">Real-Time Telemetry</h2>
+    
+    <div class="stat-row">
+      <span class="stat-label">Detected Item</span>
+      <span id="detectedItem" class="stat-val" style="color:var(--accent)">Scanning…</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Model Confidence</span>
+      <span id="confidence" class="stat-val">—</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Sensor Distance</span>
+      <span id="sensorDist" class="stat-val">Disconnected</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">System State</span>
+      <span id="systemState" class="stat-val">Ready</span>
+    </div>
+
+    <div id="decisionCard" class="decision-box">
+      WAITING FOR ITEM
+    </div>
+
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--panel-border)">
+      <h3 style="font-size:0.9rem;margin-bottom:8px;color:var(--text)">Sorting Rules</h3>
+      <ul class="rules-list">
+        <li><strong>E-Waste</strong> (phone, laptop, mouse, keyboard, remote, electronics): <strong>Motor LEFT (0°)</strong></li>
+        <li><strong>Normal Waste</strong> (bottle, cup, food, box, paper): <strong>Motor RIGHT (180°)</strong></li>
+        <li><strong>3-Second Stability</strong>: Confirms object identity over 3s before triggering motor.</li>
+        <li><strong>Reset Mechanism</strong>: Motor resets to center (90°); clears when item removed (>20cm).</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+
+// Object Categories matching YOLO / COCO classes
+const E_WASTE_CLASSES = new Set([
+  'cell phone', 'laptop', 'mouse', 'keyboard', 'remote', 'microwave',
+  'toaster', 'tv', 'refrigerator', 'clock', 'book'
+]);
+
+const NORMAL_WASTE_CLASSES = new Set([
+  'bottle', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
+  'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut',
+  'cake', 'vase', 'scissors', 'teddy bear', 'toothbrush'
+]);
+
+let net = null;
+let stream = null;
+let running = false;
+let port = null, writer = null, reader = null;
+let distance = null;
+
+// State Machine Variables
+let state = 'IDLE'; // 'IDLE', 'ANALYZING', 'DECIDED', 'COOLDOWN'
+let analysisStart = 0;
+const ANALYSIS_DURATION = 3000; // 3.0 seconds
+let sampleVotes = [];
+let fixedDecision = null;
+let cooldownTimer = 0;
+
+// Load COCO-SSD (YOLO-equivalent object detection inside browser)
+async function initModel() {
+  try {
+    $('engineStatus').textContent = 'Loading YOLO vision engine…';
+    net = await cocoSsd.load({base: 'mobilenet_v2'});
+    $('engineStatus').textContent = 'YOLO Vision Ready';
+    $('engineStatus').className = 'status-badge status-good';
+    $('cameraBtn').disabled = false;
+    await loadCameraDevices();
+  } catch (err) {
+    console.error(err);
+    $('engineStatus').textContent = 'Model Load Error';
+    $('engineStatus').className = 'status-badge status-bad';
+  }
+}
+
+async function loadCameraDevices() {
+  try {
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+    $('cams').innerHTML = '';
+    devices.forEach((d, idx) => {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.textContent = d.label || `Camera ${idx + 1}`;
+      $('cams').appendChild(opt);
+    });
+    if (!devices.length) $('cams').innerHTML = '<option value="">No camera available</option>';
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+$('cameraBtn').onclick = async () => {
+  if (running) return;
+  try {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    const devId = $('cams').value;
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: devId ? {deviceId: {exact: devId}, width: {ideal: 1280}, height: {ideal: 720}} : true,
+      audio: false
+    });
+    $('video').srcObject = stream;
+    await $('video').play();
+    running = true;
+    $('cameraBtn').textContent = 'Camera Active';
+    $('cameraBtn').disabled = true;
+    requestAnimationFrame(detectLoop);
+  } catch (err) {
+    alert('Webcam access error: ' + err.message);
+  }
+};
+
+let lastTime = performance.now();
+let frames = 0, fps = 30;
+
+async function detectLoop() {
+  if (!running || !net) return;
+
+  const now = performance.now();
+  frames++;
+  if (now - lastTime >= 1000) {
+    fps = frames;
+    frames = 0;
+    lastTime = now;
+    $('fpsMeter').textContent = `FPS: ${fps}`;
+  }
+
+  const video = $('video');
+  const canvas = $('overlay');
+  const ctx = canvas.getContext('2d');
+
+  if (video.readyState >= 2) {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Run YOLO detection
+    const predictions = await net.detect(video);
+
+    let topItem = null;
+    let topCat = null;
+    let topConf = 0;
+
+    // Draw Bounding Boxes
+    predictions.forEach(p => {
+      const [x, y, w, h] = p.bbox;
+      const label = p.class.toLowerCase();
+      let cat = 'U';
+      let color = '#94a3b8';
+
+      if (E_WASTE_CLASSES.has(label) || label.includes('phone') || label.includes('laptop') || label.includes('mouse') || label.includes('keyboard')) {
+        cat = 'E';
+        color = '#ef4444';
+      } else if (NORMAL_WASTE_CLASSES.has(label) || label.includes('bottle') || label.includes('cup') || label.includes('plastic')) {
+        cat = 'N';
+        color = '#22c55e';
+      }
+
+      if (p.score > topConf && (cat === 'E' || cat === 'N')) {
+        topConf = p.score;
+        topItem = p.class;
+        topCat = cat;
+      }
+
+      // Draw box
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = color;
+      ctx.strokeRect(x, y, w, h);
+
+      // Label badge
+      ctx.fillStyle = color;
+      const text = `${p.class.toUpperCase()} ${(p.score * 100).toFixed(0)}% [${cat==='E'?'E-WASTE':(cat==='N'?'NORMAL':'OTHER')}]`;
+      ctx.font = 'bold 14px "Segoe UI", sans-serif';
+      const textWidth = ctx.measureText(text).width;
+      ctx.fillRect(x, Math.max(0, y - 24), textWidth + 12, 24);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(text, x + 6, Math.max(16, y - 6));
+    });
+
+    if (topItem) {
+      $('detectedItem').textContent = topItem.toUpperCase();
+      $('confidence').textContent = `${(topConf * 100).toFixed(1)}%`;
+    } else {
+      $('detectedItem').textContent = 'Scanning…';
+      $('confidence').textContent = '—';
+    }
+
+    // -------------------------------------------------------------
+    // 3-SECOND STABILITY ANALYSIS & ARDUINO SERVO TRIGGER
+    // -------------------------------------------------------------
+    const currentTime = performance.now();
+    const itemInRange = (distance !== null && distance <= 15.0) || (distance === null && topCat !== null);
+
+    if (state === 'IDLE') {
+      $('countdownBox').style.display = 'none';
+      if (itemInRange && topCat !== null) {
+        state = 'ANALYZING';
+        analysisStart = currentTime;
+        sampleVotes = [topCat];
+        $('systemState').textContent = 'Analyzing (3s)...';
+        $('decisionCard').className = 'decision-box analyzing';
+        $('decisionCard').textContent = 'ANALYZING ITEM STABILITY...';
+      } else {
+        $('systemState').textContent = 'Ready';
+        $('decisionCard').className = 'decision-box';
+        $('decisionCard').textContent = 'WAITING FOR ITEM';
+      }
+    } else if (state === 'ANALYZING') {
+      $('countdownBox').style.display = 'block';
+      const elapsed = currentTime - analysisStart;
+      const remaining = Math.max(0, (ANALYSIS_DURATION - elapsed) / 1000);
+      $('countdownNum').textContent = `${remaining.toFixed(1)}s`;
+      $('countdownBar').style.width = `${((ANALYSIS_DURATION - elapsed) / ANALYSIS_DURATION) * 100}%`;
+
+      if (topCat) sampleVotes.push(topCat);
+
+      if (elapsed >= ANALYSIS_DURATION) {
+        // Vote majority
+        const countE = sampleVotes.filter(v => v === 'E').length;
+        const countN = sampleVotes.filter(v => v === 'N').length;
+        fixedDecision = countE >= countN ? 'E' : 'N';
+
+        state = 'DECIDED';
+        $('countdownBox').style.display = 'none';
+        cooldownTimer = currentTime;
+
+        if (fixedDecision === 'E') {
+          $('decisionCard').className = 'decision-box ewaste';
+          $('decisionCard').textContent = 'DECISION: E-WASTE (MOTOR LEFT 0°)';
+          $('systemState').textContent = 'E-Waste Sorted';
+          sendSerial('E\n');
+        } else {
+          $('decisionCard').className = 'decision-box normal';
+          $('decisionCard').textContent = 'DECISION: NORMAL WASTE (MOTOR RIGHT 180°)';
+          $('systemState').textContent = 'Normal Waste Sorted';
+          sendSerial('N\n');
+        }
+      }
+    } else if (state === 'DECIDED') {
+      if (currentTime - cooldownTimer > 2000) {
+        state = 'COOLDOWN';
+        $('systemState').textContent = 'Sort Complete. Remove item.';
+      }
+    } else if (state === 'COOLDOWN') {
+      const itemCleared = (distance !== null && distance > 20.0) || (distance === null && topCat === null);
+      if (itemCleared) {
+        state = 'IDLE';
+        fixedDecision = null;
+        $('decisionCard').className = 'decision-box';
+        $('decisionCard').textContent = 'READY FOR NEXT ITEM';
+      }
+    }
+  }
+
+  requestAnimationFrame(detectLoop);
+}
+
+// -----------------------------------------------------------------
+// ARDUINO WEB SERIAL CONNECTION
+// -----------------------------------------------------------------
+async function sendSerial(msg) {
+  if (writer) {
+    try {
+      await writer.write(new TextEncoder().encode(msg));
+    } catch (e) {
+      console.error('Serial write error', e);
+    }
+  }
+}
+
+$('arduinoBtn').onclick = async () => {
+  if (!('serial' in navigator)) {
+    alert('Web Serial requires Chrome or Edge on localhost/HTTPS.');
+    return;
+  }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({baudRate: 9600});
+    writer = port.writable.getWriter();
+    $('arduinoBtn').textContent = 'Arduino Connected';
+    $('arduinoBtn').style.background = '#15803d';
+    readArduino();
+  } catch (err) {
+    alert('Serial connection failed: ' + err.message);
+  }
+};
+
+async function readArduino() {
+  const decoder = new TextDecoderStream();
+  port.readable.pipeTo(decoder.writable).catch(() => {});
+  reader = decoder.readable.getReader();
+  let buffer = '';
+
+  try {
+    while (port && reader) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      buffer += value;
+      let newlineIdx;
+      while ((newlineIdx = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newlineIdx).trim();
+        buffer = buffer.slice(newlineIdx + 1);
+
+        if (line.startsWith('D:')) {
+          const val = parseFloat(line.slice(2));
+          if (!isNaN(val) && val >= 0) {
+            distance = val;
+            $('sensorDist').textContent = `${val.toFixed(1)} cm`;
+          } else {
+            distance = null;
+            $('sensorDist').textContent = 'Out of range';
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Reader stopped', e);
+  }
+}
+
+$('stopBtn').onclick = async () => {
+  running = false;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null;
+  $('video').srcObject = null;
+  $('cameraBtn').textContent = 'Start Camera Feed';
+  $('cameraBtn').disabled = false;
+  if (writer) { try { await writer.releaseLock(); } catch(e){} writer = null; }
+  if (reader) { try { await reader.cancel(); } catch(e){} reader = null; }
+  if (port) { try { await port.close(); } catch(e){} port = null; }
+  $('arduinoBtn').textContent = 'Connect Arduino USB';
+  $('arduinoBtn').style.background = '';
+  $('sensorDist').textContent = 'Disconnected';
+  $('systemState').textContent = 'Stopped';
+};
+
+initModel();
+})();
+</script>
+</body>
+</html>
